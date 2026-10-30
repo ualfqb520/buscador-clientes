@@ -36,6 +36,10 @@
   .go:disabled { opacity: .6; cursor: progress; }
   .opts { display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--muted); flex-wrap: wrap; width: 100%; }
   .opts select.btn { padding: 6px 10px; margin-left: 6px; }
+  .google-usage { display: flex; gap: 6px 12px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .google-usage input { width: 58px; font-size: 13px; }
+  .google-usage small { font-size: 11.5px; color: var(--muted); }
+  .google-usage small.limited { color: var(--red); }
   body.osm #keyField { display: none; }
   .opts label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
   .opts input { accent-color: var(--gold); }
@@ -118,6 +122,10 @@
     <div class="field" id="keyField" style="min-width:230px">
       <label for="gkey">Clave de Google Places API</label>
       <input id="gkey" type="password" autocomplete="off" placeholder="AIza…">
+      <div class="google-usage">
+        <label for="googleLimit">Límite diario <input id="googleLimit" type="number" min="1" max="1000" value="30"></label>
+        <small id="googleUsage" aria-live="polite"></small>
+      </div>
     </div>
     <label><input type="checkbox" id="socialAsWeb"> Contar Facebook/Instagram como web</label>
   </div>
@@ -296,20 +304,48 @@ const PLACES_URL = 'https://places.googleapis.com/v1/places:searchText';
 const PLACES_FIELDS = ['id', 'displayName', 'shortFormattedAddress', 'formattedAddress', 'nationalPhoneNumber',
   'websiteUri', 'location', 'primaryTypeDisplayName', 'businessStatus'].map(f => 'places.' + f).join(',') + ',nextPageToken';
 const SOCIAL_RE = /facebook\.com|instagram\.com|linktr\.ee|wa\.me|tiktok\.com/i;
-const MAX_CALLS = 40;
+let googleLimit = 30, googleUsage = { date: '', count: 0 };
+try {
+  const limit = Number(localStorage.getItem('google-limite'));
+  if (Number.isInteger(limit) && limit >= 1 && limit <= 1000) googleLimit = limit;
+  const usage = JSON.parse(localStorage.getItem('google-uso') || 'null');
+  if (usage && Number.isInteger(usage.count) && usage.count >= 0) googleUsage = usage;
+} catch {}
+function syncGoogleUsage() {
+  const now = new Date();
+  const date = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  if (googleUsage.date !== date) googleUsage = { date, count: 0 };
+  try { localStorage.setItem('google-uso', JSON.stringify(googleUsage)); } catch {}
+  $('googleUsage').textContent = 'Hoy: ' + googleUsage.count + ' / ' + googleLimit + ' consultas';
+  $('googleUsage').classList.toggle('limited', googleUsage.count >= googleLimit);
+}
+$('googleLimit').value = googleLimit;
+$('googleLimit').onchange = () => {
+  googleLimit = Math.min(1000, Math.max(1, Math.round(Number($('googleLimit').value) || 30)));
+  $('googleLimit').value = googleLimit;
+  try { localStorage.setItem('google-limite', googleLimit); } catch {}
+  syncGoogleUsage();
+};
+syncGoogleUsage();
 
 async function googleSearch(sector, rKm, id, center, signal) {
   const key = $('gkey').value.trim();
-  if (!key) throw new Error('Pega tu clave de Google Places API, o cambia la fuente de datos a OpenStreetMap.');
+  syncGoogleUsage();
+  const MAX_CALLS = Math.min(15, Math.max(0, googleLimit - googleUsage.count));
+  if (MAX_CALLS && !key) throw new Error('Pega tu clave de Google Places API, o cambia la fuente de datos a OpenStreetMap.');
   const places = new Map();
-  let calls = 0, truncated = false;
+  let calls = 0, truncated = false, limited = false;
   async function area(lat, lon, halfKm, depth) {
     const dLat = halfKm / 111.32, dLon = halfKm / (111.32 * Math.cos(lat * Math.PI / 180));
     let token, n = 0;
     do {
       if (id !== searchId) return;
+      syncGoogleUsage();
+      if (googleUsage.count >= googleLimit) { limited = true; return; }
       if (calls >= MAX_CALLS) { truncated = true; return; }
       calls++;
+      googleUsage.count++;
+      syncGoogleUsage();
       const r = await fetch(PLACES_URL, {
         method: 'POST', signal,
         headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': PLACES_FIELDS },
@@ -332,7 +368,7 @@ async function googleSearch(sector, rKm, id, center, signal) {
     }
   }
   await area(center[0], center[1], rKm, 0);
-  return { truncated, found: [...places.values()]
+  return { truncated, limited, found: [...places.values()]
     .filter(p => p.businessStatus !== 'CLOSED_PERMANENTLY')
     .map(p => {
       const lat = p.location.latitude, lon = p.location.longitude;
@@ -373,11 +409,11 @@ $('form').onsubmit = async e => {
   try {
     const searchCenter = await geocode($('city').value, signal);
     if (id !== searchId) return;
-    let found, truncated = false;
+    let found, truncated = false, limited = false;
     if ($('source').value === 'google') {
       const result = await googleSearch($('sector').value, +$('radius').value, id, searchCenter, signal);
       if (id !== searchId) return;
-      ({ found, truncated } = result);
+      ({ found, truncated, limited } = result);
     } else {
       setStatus('Consultando OpenStreetMap… puede tardar hasta un minuto en radios grandes.');
       const data = await overpass(buildQuery($('sector').value, +$('radius').value * 1000, searchCenter), signal);
@@ -401,7 +437,8 @@ $('form').onsubmit = async e => {
     all = found.sort((a, b) => (hasWeb(a) - hasWeb(b)) || a.dist - b.dist);
     setStatus(all.length ? '' : 'No hay resultados. Amplía el radio o prueba otro sector.');
     render();
-    if (truncated) setStatus('Resultados parciales: se alcanzó el límite de consultas a Google. Reduce el radio para verlos todos.');
+    if (limited) setStatus(`Has llegado al límite diario de consultas a Google (${googleLimit}). Se reinicia mañana; mientras, puedes usar OpenStreetMap.`);
+    else if (truncated) setStatus('Resultados parciales: se alcanzó el límite de consultas a Google. Reduce el radio para verlos todos.');
     fillAddresses(id, signal);
   } catch (err) {
     if (id === searchId) setStatus(err.message, true);
