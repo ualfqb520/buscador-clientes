@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buscador de clientes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --ink: #16140f; --panel: #1f1c15; --raised: #29251c; --line: #352f24;
+    --text: #efe8d8; --muted: #a39a85; --gold: #e5b53a; --on-gold: #1a1508;
+    --red: #ff7a6b; --red-bg: #43201b; --row-hi: #1f1b10;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ink); color: var(--text);
+    font: 15px/1.45 Archivo, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  a { color: var(--gold); }
+  :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+  .bar { position: sticky; top: 0; z-index: 1000; background: var(--ink);
+    border-bottom: 1px solid var(--line); padding: 14px 24px;
+    display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
+  .brand { font-weight: 800; font-size: 19px; align-self: center; margin-right: 12px; letter-spacing: -.01em; }
+  .field { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 6px 12px; display: flex; flex-direction: column; min-width: 190px; }
+  .field:focus-within { border-color: var(--gold); }
+  .field label { font-size: 11.5px; color: var(--muted); }
+  .field input { background: none; border: 0; color: var(--text); font: inherit; font-weight: 500;
+    padding: 0; outline: none; width: 100%; }
+  .field.radius { min-width: 170px; }
+  .field input[type=range] { accent-color: var(--gold); margin-top: 6px; }
+  .go { background: var(--gold); color: var(--on-gold); border: 0; border-radius: 10px;
+    font: inherit; font-weight: 800; padding: 0 26px; cursor: pointer; }
+  .go:disabled { opacity: .6; cursor: progress; }
+  .opts { display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--muted); flex-wrap: wrap; width: 100%; }
+  .opts select.btn { padding: 6px 10px; margin-left: 6px; }
+  body.osm #keyField { display: none; }
+  .opts label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .opts input { accent-color: var(--gold); }
+
+  main { padding: 20px 24px 40px; max-width: 1400px; margin: 0 auto; }
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 18px; min-width: 150px; text-align: left; color: inherit; font: inherit; cursor: pointer; }
+  .stat b { display: block; font-size: 32px; font-weight: 800; line-height: 1.1; }
+  .stat span { font-size: 12.5px; color: var(--muted); }
+  .stat.red b { color: var(--red); }
+  .stat[aria-pressed=true] { border-color: var(--gold); background: var(--raised); }
+  .tools { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .btn { background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    border-radius: 10px; padding: 9px 14px; font: inherit; font-size: 13.5px; cursor: pointer; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .status { color: var(--muted); font-size: 13.5px; margin: 14px 2px 10px; min-height: 20px; }
+  .status.err { color: var(--red); }
+
+  #map { height: 340px; border-radius: 12px; border: 1px solid var(--line); margin-top: 14px; display: none; }
+  body.show-map #map { display: block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-weight: 500; font-size: 12.5px; color: var(--muted);
+    padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.noweb td { background: var(--row-hi); }
+  tr.done td { opacity: .45; }
+  tbody tr:hover td { background: var(--raised); }
+  .biz { font-weight: 600; }
+  .cat { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+  .addr, .dist { color: var(--muted); }
+  .addr.loading { font-style: italic; opacity: .7; }
+  .phone a { color: var(--text); text-decoration: none; white-space: nowrap; }
+  .badge { display: inline-block; font-size: 11.5px; font-weight: 800; padding: 3px 9px; border-radius: 99px;
+    background: var(--red-bg); color: var(--red); white-space: nowrap; }
+  .badge.social { background: none; border: 1px solid var(--gold); color: var(--gold); font-weight: 600; }
+  .hasweb { color: var(--muted); font-size: 13px; }
+  .acts { display: flex; gap: 12px; align-items: center; white-space: nowrap; font-size: 13px; }
+  .acts input { accent-color: var(--gold); }
+  .empty { color: var(--muted); padding: 40px 12px; text-align: center; }
+  .src { color: var(--muted); font-size: 12px; margin-top: 18px; }
+
+  @media (max-width: 760px) {
+    .bar { padding: 12px 16px; position: static; }
+    .field { flex: 1 1 100%; }
+    .go { flex: 1; padding: 12px; }
+    main { padding: 16px; }
+    .tools { margin-left: 0; width: 100%; }
+    thead { display: none; }
+    tr { display: block; border-bottom: 1px solid var(--line); padding: 8px 0; }
+    td { display: block; border: 0; padding: 3px 4px; }
+  }
+</style>
+</head>
+<body>
+<form class="bar" id="form">
+  <div class="brand">Buscador de clientes</div>
+  <div class="field">
+    <label for="sector">Sector</label>
+    <input id="sector" list="sectors" value="peluquería" autocomplete="off" required>
+    <datalist id="sectors"></datalist>
+  </div>
+  <div class="field">
+    <label for="city">Ciudad o dirección</label>
+    <input id="city" value="Almería" required>
+  </div>
+  <div class="field radius">
+    <label for="radius">Radio: <span id="radiusVal">3</span> km</label>
+    <input type="range" id="radius" min="0.5" max="25" step="0.5" value="3">
+  </div>
+  <button class="go" id="go">Buscar</button>
+  <div class="opts">
+    <label>Datos
+      <select id="source" class="btn">
+        <option value="google">Google Maps</option>
+        <option value="osm">OpenStreetMap (gratis)</option>
+      </select>
+    </label>
+    <div class="field" id="keyField" style="min-width:230px">
+      <label for="gkey">Clave de Google Places API</label>
+      <input id="gkey" type="password" autocomplete="off" placeholder="AIza…">
+    </div>
+    <label><input type="checkbox" id="socialAsWeb"> Contar Facebook/Instagram como web</label>
+  </div>
+</form>
+
+<main>
+  <div class="stats">
+    <button class="stat" data-f="all" aria-pressed="true"><b id="nAll">0</b><span>negocios encontrados</span></button>
+    <button class="stat red" data-f="noweb" aria-pressed="false"><b id="nNoWeb">0</b><span>sin página web</span></button>
+    <button class="stat" data-f="phone" aria-pressed="false"><b id="nPhone">0</b><span>sin web y con teléfono</span></button>
+    <div class="tools">
+      <button class="btn" type="button" id="mapBtn">Ver mapa</button>
+      <button class="btn" type="button" id="csv" disabled>Exportar CSV</button>
+    </div>
+  </div>
+  <div id="map"></div>
+  <div class="status" id="status">Escribe un sector y tu ciudad, y pulsa Buscar.</div>
+  <table>
+    <thead><tr><th>Negocio</th><th>Dirección</th><th>Teléfono</th><th>Distancia</th><th>Web</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="src">Un negocio puede tener web aunque la fuente no la tenga registrada: usa «Comprobar» antes de contactar. Los enlaces de Facebook o Instagram cuentan como «solo redes».</p>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// Sector name -> OSM tag filters. Synonyms are matched without accents.
+const SECTORS = [
+  [['peluqueria', 'peluqueros', 'barberia', 'barbero'], ['shop=hairdresser']],
+  [['estetica', 'belleza', 'unas', 'masajes', 'spa'], ['shop=beauty', 'shop=massage', 'shop=cosmetics']],
+  [['restaurante', 'restaurantes'], ['amenity=restaurant']],
+  [['bar', 'bares', 'cafeteria', 'cafe', 'pub'], ['amenity=bar', 'amenity=cafe', 'amenity=pub']],
+  [['comida rapida', 'kebab', 'pizzeria', 'hamburgueseria'], ['amenity=fast_food']],
+  [['taller', 'taller mecanico', 'mecanico', 'neumaticos'], ['shop=car_repair', 'shop=tyres', 'craft=car_repair']],
+  [['fontanero', 'electricista', 'carpinteria', 'pintor', 'cerrajero', 'climatizacion', 'oficios'],
+    ['craft=plumber', 'craft=electrician', 'craft=carpenter', 'craft=painter', 'craft=locksmith', 'shop=locksmith', 'craft=hvac']],
+  [['dentista', 'clinica dental'], ['amenity=dentist', 'healthcare=dentist']],
+  [['fisioterapia', 'fisio', 'podologo', 'psicologo', 'clinica'],
+    ['healthcare=physiotherapist', 'healthcare=podiatrist', 'healthcare=psychotherapist', 'amenity=clinic']],
+  [['veterinario', 'mascotas', 'peluqueria canina'], ['amenity=veterinary', 'shop=pet', 'shop=pet_grooming']],
+  [['gimnasio', 'deporte', 'crossfit', 'yoga'], ['leisure=fitness_centre', 'leisure=sports_centre', 'shop=sports']],
+  [['panaderia', 'pasteleria', 'confiteria'], ['shop=bakery', 'shop=pastry', 'shop=confectionery']],
+  [['carniceria', 'fruteria', 'pescaderia', 'alimentacion', 'supermercado'],
+    ['shop=butcher', 'shop=greengrocer', 'shop=seafood', 'shop=convenience', 'shop=supermarket', 'shop=deli']],
+  [['ropa', 'moda', 'zapateria', 'calzado'], ['shop=clothes', 'shop=shoes', 'shop=boutique']],
+  [['floristeria', 'flores', 'vivero'], ['shop=florist', 'shop=garden_centre']],
+  [['ferreteria', 'bricolaje', 'pinturas'], ['shop=hardware', 'shop=doityourself', 'shop=paint']],
+  [['muebles', 'decoracion', 'cocinas'], ['shop=furniture', 'shop=interior_decoration', 'shop=kitchen']],
+  [['inmobiliaria'], ['office=estate_agent']],
+  [['asesoria', 'gestoria', 'abogado', 'abogados', 'seguros'], ['office=accountant', 'office=lawyer', 'office=tax_advisor', 'office=insurance']],
+  [['autoescuela', 'academia', 'escuela de musica', 'idiomas'], ['amenity=driving_school', 'amenity=language_school', 'amenity=music_school']],
+  [['hotel', 'hostal', 'alojamiento', 'apartamentos'], ['tourism=hotel', 'tourism=guest_house', 'tourism=hostel', 'tourism=apartment']],
+  [['optica'], ['shop=optician']],
+  [['joyeria'], ['shop=jewelry']],
+  [['lavanderia', 'tintoreria'], ['shop=laundry', 'shop=dry_cleaning']],
+  [['farmacia'], ['amenity=pharmacy']],
+  [['tienda', 'tiendas', 'comercio'], ['shop']],
+];
+const OVERPASS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
+const WEB_KEYS = ['website', 'contact:website', 'url', 'brand:website'];
+const SOCIAL_KEYS = ['contact:facebook', 'facebook', 'contact:instagram', 'instagram'];
+const CAT_ES = {
+  hairdresser: 'peluquería', beauty: 'estética', restaurant: 'restaurante', bar: 'bar', cafe: 'cafetería', pub: 'pub',
+  fast_food: 'comida rápida', car_repair: 'taller', dentist: 'dentista', veterinary: 'veterinario', bakery: 'panadería',
+  clothes: 'ropa', florist: 'floristería', hardware: 'ferretería', estate_agent: 'inmobiliaria', physiotherapist: 'fisioterapia',
+  fitness_centre: 'gimnasio', optician: 'óptica', pharmacy: 'farmacia', massage: 'masajes', butcher: 'carnicería',
+};
+const $ = id => document.getElementById(id);
+const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+SECTORS.forEach(([names]) => $('sectors').append(new Option(names[0])));
+$('radius').oninput = () => { $('radiusVal').textContent = $('radius').value; };
+
+let all = [], filter = 'all', center = null, searchId = 0, searchController;
+let done = {};
+try { done = JSON.parse(localStorage.getItem('clientes-contactados') || '{}'); } catch {}
+const saveDone = () => { try { localStorage.setItem('clientes-contactados', JSON.stringify(done)); } catch {} };
+
+let map, layer;
+function ensureMap() {
+  if (map) return;
+  map = L.map('map');
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+  layer = L.layerGroup().addTo(map);
+}
+$('mapBtn').onclick = () => {
+  const on = document.body.classList.toggle('show-map');
+  $('mapBtn').textContent = on ? 'Ocultar mapa' : 'Ver mapa';
+  if (on) { ensureMap(); drawMap(); setTimeout(() => map.invalidateSize(), 50); }
+};
+
+async function geocode(q, signal) {
+  const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (m) return [+m[1], +m[2]];
+  // Photon returns the town's centre node; Nominatim returns the municipality centroid, which can be km away
+  const r = await fetch('https://photon.komoot.io/api/?limit=8&bbox=-18.5,27.5,4.5,43.9&q=' + encodeURIComponent(q), { signal });
+  const f = (await r.json()).features || [];
+  if (!f.length) throw new Error(`No encuentro «${q}». Prueba con el nombre de la ciudad o una calle.`);
+  const town = norm(q.split(',')[0]);
+  const best = f.find(x => x.properties.osm_key === 'place' && norm(x.properties.name || '') === town
+      && ['city', 'town', 'village', 'suburb', 'neighbourhood', 'quarter', 'hamlet'].includes(x.properties.osm_value))
+    || f.find(x => x.properties.osm_key !== 'boundary' && !['state', 'province', 'region', 'county'].includes(x.properties.osm_value))
+    || f[0];
+  const [lon, lat] = best.geometry.coordinates;
+  return [lat, lon];
+}
+
+function buildQuery(sector, r, [lat, lon]) {
+  const key = norm(sector);
+  const hit = SECTORS.find(([names]) => names.some(n => n === key))
+    || SECTORS.find(([names]) => names.some(n => n.startsWith(key) || key.startsWith(n)));
+  const around = `(around:${r},${lat},${lon})`;
+  let parts;
+  if (hit) {
+    parts = hit[1].map(f => { const [k, v] = f.split('='); return `nwr["${k}"${v ? `="${v}"` : ''}]["name"]${around};`; });
+  } else {
+    // Unknown sector: search business names containing the word
+    const word = sector.replace(/["\\]/g, '');
+    parts = ['shop', 'amenity', 'craft', 'office', 'healthcare', 'leisure']
+      .map(k => `nwr["${k}"]["name"~"${word}",i]${around};`);
+  }
+  return `[out:json][timeout:60];(${parts.join('')});out center tags;`;
+}
+
+// Ask every mirror at once and keep the first valid answer
+async function overpass(q, signal) {
+  const ctrls = OVERPASS.map(() => new AbortController());
+  const abort = () => ctrls.forEach(c => c.abort());
+  signal.addEventListener('abort', abort, { once: true });
+  if (signal.aborted) abort();
+  const timer = setTimeout(() => ctrls.forEach(c => c.abort()), 70000);
+  try {
+    return await Promise.any(OVERPASS.map(async (url, i) => {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctrls[i].signal });
+      if (!r.ok) throw new Error(url + ' ' + r.status);
+      const j = await r.json();
+      ctrls.forEach((c, k) => k !== i && c.abort());
+      return j;
+    }));
+  } catch {
+    throw new Error('Los servidores de OpenStreetMap no responden ahora. Espera un minuto y vuelve a buscar, o reduce el radio.');
+  } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); }
+}
+
+function distKm([a, b], [c, d]) {
+  const R = 6371, t = x => x * Math.PI / 180;
+  const h = Math.sin(t(c - a) / 2) ** 2 + Math.cos(t(a)) * Math.cos(t(c)) * Math.sin(t(d - b) / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function toBiz(el, center) {
+  const t = el.tags;
+  const lat = el.lat ?? el.center.lat, lon = el.lon ?? el.center.lon;
+  const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' ');
+  const raw = ['amenity', 'shop', 'craft', 'office', 'healthcare', 'leisure', 'tourism'].map(k => t[k]).find(Boolean) || '';
+  return {
+    id: el.type + '/' + el.id, name: t.name, lat, lon, dist: distKm(center, [lat, lon]),
+    cat: CAT_ES[raw] || raw.replace(/_/g, ' '),
+    addr: street ? street + (t['addr:postcode'] ? ', ' + t['addr:postcode'] : '') : '',
+    phone: t.phone || t['contact:phone'] || t.mobile || t['contact:mobile'] || '',
+    email: t.email || t['contact:email'] || '',
+    web: WEB_KEYS.map(k => t[k]).find(Boolean) || '',
+    social: SOCIAL_KEYS.map(k => t[k]).find(Boolean) || '',
+  };
+}
+
+// Google Places API (New). Text Search returns at most 60 results per area,
+// so a saturated area is split into quadrants (capped to keep the cost down).
+const PLACES_URL = 'https://places.googleapis.com/v1/places:searchText';
+const PLACES_FIELDS = ['id', 'displayName', 'shortFormattedAddress', 'formattedAddress', 'nationalPhoneNumber',
+  'websiteUri', 'location', 'primaryTypeDisplayName', 'businessStatus'].map(f => 'places.' + f).join(',') + ',nextPageToken';
+const SOCIAL_RE = /facebook\.com|instagram\.com|linktr\.ee|wa\.me|tiktok\.com/i;
+const MAX_CALLS = 40;
+
+async function googleSearch(sector, rKm, id, center, signal) {
+  const key = $('gkey').value.trim();
+  if (!key) throw new Error('Pega tu clave de Google Places API, o cambia la fuente de datos a OpenStreetMap.');
+  const places = new Map();
+  let calls = 0, truncated = false;
+  async function area(lat, lon, halfKm, depth) {
+    const dLat = halfKm / 111.32, dLon = halfKm / (111.32 * Math.cos(lat * Math.PI / 180));
+    let token, n = 0;
+    do {
+      if (id !== searchId) return;
+      if (calls >= MAX_CALLS) { truncated = true; return; }
+      calls++;
+      const r = await fetch(PLACES_URL, {
+        method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': PLACES_FIELDS },
+        body: JSON.stringify({
+          textQuery: sector, languageCode: 'es', regionCode: 'ES', pageSize: 20, pageToken: token,
+          locationRestriction: { rectangle: {
+            low: { latitude: lat - dLat, longitude: lon - dLon }, high: { latitude: lat + dLat, longitude: lon + dLon } } },
+        }),
+      });
+      const j = await r.json();
+      if (id !== searchId) return;
+      if (!r.ok) throw new Error('Google respondió: ' + (j.error?.message || r.status));
+      for (const p of j.places || []) { places.set(p.id, p); n++; }
+      token = j.nextPageToken;
+      setStatus(`Consultando Google Maps… ${places.size} negocios`);
+    } while (token);
+    if (n >= 60 && depth < 2) {
+      for (const [a, b] of [[-1, -1], [-1, 1], [1, -1], [1, 1]])
+        await area(lat + a * dLat / 2, lon + b * dLon / 2, halfKm / 2, depth + 1);
+    }
+  }
+  await area(center[0], center[1], rKm, 0);
+  return { truncated, found: [...places.values()]
+    .filter(p => p.businessStatus !== 'CLOSED_PERMANENTLY')
+    .map(p => {
+      const lat = p.location.latitude, lon = p.location.longitude;
+      const site = p.websiteUri || '';
+      return {
+        id: 'g/' + p.id, name: p.displayName?.text || '', lat, lon, dist: distKm(center, [lat, lon]),
+        cat: p.primaryTypeDisplayName?.text || '',
+        addr: p.shortFormattedAddress || p.formattedAddress || 'sin dirección',
+        phone: p.nationalPhoneNumber || '', email: '',
+        web: SOCIAL_RE.test(site) ? '' : site,
+        social: SOCIAL_RE.test(site) ? site : '',
+      };
+    })
+    .filter(b => b.dist <= rKm) };
+}
+
+const sourceSel = $('source');
+try {
+  $('gkey').value = localStorage.getItem('places-key') || '';
+  sourceSel.value = localStorage.getItem('fuente') || 'google';
+} catch {}
+const syncSource = () => document.body.classList.toggle('osm', sourceSel.value === 'osm');
+syncSource();
+sourceSel.onchange = () => { syncSource(); try { localStorage.setItem('fuente', sourceSel.value); } catch {} };
+$('gkey').onchange = () => { try { localStorage.setItem('places-key', $('gkey').value.trim()); } catch {} };
+
+const hasWeb = b =>!!b.web || ($('socialAsWeb').checked && !!b.social);
+
+$('form').onsubmit = async e => {
+  e.preventDefault();
+  const id = ++searchId;
+  searchController?.abort();
+  const controller = new AbortController();
+  searchController = controller;
+  const signal = controller.signal;
+  $('go').disabled = true; $('go').textContent = 'Buscando…';
+  setStatus('Localizando la zona…');
+  try {
+    const searchCenter = await geocode($('city').value, signal);
+    if (id !== searchId) return;
+    let found, truncated = false;
+    if ($('source').value === 'google') {
+      const result = await googleSearch($('sector').value, +$('radius').value, id, searchCenter, signal);
+      if (id !== searchId) return;
+      ({ found, truncated } = result);
+    } else {
+      setStatus('Consultando OpenStreetMap… puede tardar hasta un minuto en radios grandes.');
+      const data = await overpass(buildQuery($('sector').value, +$('radius').value * 1000, searchCenter), signal);
+      if (id !== searchId) return;
+      const seen = new Set(), locations = new Map();
+      found = data.elements.filter(el => {
+        const k = el.type + '/' + el.id;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        const name = norm(el.tags.name);
+        const location = [el.lat ?? el.center.lat, el.lon ?? el.center.lon];
+        const nearby = locations.get(name) || [];
+        if (nearby.some(p => distKm(p, location) <= 0.03)) return false;
+        nearby.push(location);
+        locations.set(name, nearby);
+        return true;
+      }).map(el => toBiz(el, searchCenter));
+    }
+    if (id !== searchId) return;
+    center = searchCenter;
+    all = found.sort((a, b) => (hasWeb(a) - hasWeb(b)) || a.dist - b.dist);
+    setStatus(all.length ? '' : 'No hay resultados. Amplía el radio o prueba otro sector.');
+    render();
+    if (truncated) setStatus('Resultados parciales: se alcanzó el límite de consultas a Google. Reduce el radio para verlos todos.');
+    fillAddresses(id, signal);
+  } catch (err) {
+    if (id === searchId) setStatus(err.message, true);
+  } finally {
+    if (id === searchId) { $('go').disabled = false; $('go').textContent = 'Buscar'; }
+  }
+};
+
+function setStatus(msg, isErr) { $('status').textContent = msg; $('status').classList.toggle('err', !!isErr); }
+
+document.querySelectorAll('.stat').forEach(btn => btn.onclick = () => {
+  filter = btn.dataset.f;
+  document.querySelectorAll('.stat').forEach(b => b.setAttribute('aria-pressed', b === btn));
+  render();
+});
+$('socialAsWeb').onchange = render;
+
+function visible() {
+  if (filter === 'noweb') return all.filter(b => !hasWeb(b));
+  if (filter === 'phone') return all.filter(b => !hasWeb(b) && b.phone);
+  return all;
+}
+
+function render() {
+  const noWeb = all.filter(b => !hasWeb(b));
+  $('nAll').textContent = all.length;
+  $('nNoWeb').textContent = noWeb.length;
+  $('nPhone').textContent = noWeb.filter(b => b.phone).length;
+  $('csv').disabled = !all.length;
+  const list = visible();
+  const tbody = $('rows');
+  tbody.innerHTML = list.length ? '' : `<tr><td colspan="6" class="empty">${all.length ? 'Ningún negocio con este filtro.' : 'Aún no hay resultados.'}</td></tr>`;
+  for (const b of list) {
+    const q = encodeURIComponent(b.name + ' ' + (b.addr || $('city').value));
+    const tr = document.createElement('tr');
+    tr.dataset.id = b.id;
+    tr.className = (hasWeb(b) ? '' : 'noweb') + (done[b.id] ? ' done' : '');
+    const webCell = b.web
+      ? `<a class="hasweb" href="${esc(/^https?:/.test(b.web) ? b.web : 'https://' + b.web)}" target="_blank" rel="noopener">tiene web</a>`
+      : b.social ? (hasWeb(b) ? '<span class="hasweb">solo redes</span>' : '<span class="badge social">SOLO REDES</span>')
+      : '<span class="badge">SIN WEB</span>';
+    tr.innerHTML = `
+      <td><span class="biz">${esc(b.name)}</span><span class="cat">${esc(b.cat)}</span></td>
+      <td class="addr${b.addr ? '' : ' loading'}">${b.addr ? esc(b.addr) : 'buscando dirección…'}</td>
+      <td class="phone">${b.phone ? `<a href="tel:${esc(b.phone.replace(/\s/g, ''))}">${esc(b.phone)}</a>` : '<span class="dist">—</span>'}</td>
+      <td class="dist">${b.dist.toFixed(1)} km</td>
+      <td>${webCell}</td>
+      <td><div class="acts">
+        <a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">Maps</a>
+        <a href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener" title="Comprueba en Google si de verdad no tiene web">Comprobar</a>
+        <label><input type="checkbox" ${done[b.id] ? 'checked' : ''}> Contactado</label>
+      </div></td>`;
+    tr.querySelector('input').onchange = ev => {
+      if (ev.target.checked) done[b.id] = 1; else delete done[b.id];
+      tr.classList.toggle('done', ev.target.checked); saveDone();
+    };
+    tbody.append(tr);
+  }
+  if (map && document.body.classList.contains('show-map')) drawMap();
+}
+
+function drawMap() {
+  if (!center) { map.setView([36.8381, -2.4597], 13); return; }
+  layer.clearLayers();
+  const circle = L.circle(center, { radius: +$('radius').value * 1000, color: '#e5b53a', weight: 1.5, fillOpacity: .05 }).addTo(layer);
+  for (const b of visible()) {
+    L.circleMarker([b.lat, b.lon], { radius: 6, weight: 1.5, color: hasWeb(b) ? '#a39a85' : '#ff7a6b', fillOpacity: .8 })
+      .bindPopup(`<b>${esc(b.name)}</b><br>${esc(b.addr)}${b.phone ? '<br>' + esc(b.phone) : ''}`).addTo(layer);
+  }
+  map.fitBounds(circle.getBounds());
+}
+
+// OSM often lacks the street address: fill it in by reverse geocoding, 1 request per second (Nominatim policy)
+async function fillAddresses(id, signal) {
+  for (const b of all.filter(b => !b.addr)) {
+    if (id !== searchId) return;
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=18&lat=${b.lat}&lon=${b.lon}`, { signal });
+      const a = (await r.json()).address || {};
+      if (id !== searchId) return;
+      b.addr = [a.road || a.pedestrian || a.square, a.house_number].filter(Boolean).join(' ')
+        + (a.postcode ? ', ' + a.postcode : '') || 'sin dirección';
+    } catch {
+      if (id !== searchId) return;
+      b.addr = 'sin dirección'; }
+    const cell = document.querySelector(`tr[data-id="${b.id}"] .addr`);
+    if (cell) { cell.textContent = b.addr; cell.classList.remove('loading'); }
+    await new Promise(r => setTimeout(r, 1100));
+  }
+}
+
+$('csv').onclick = () => {
+  const head = ['Nombre', 'Categoría', 'Dirección', 'Teléfono', 'Email', 'Web', 'Redes', 'Distancia km', 'Contactado'];
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = visible().map(b => [b.name, b.cat, b.addr, b.phone, b.email, b.web || 'SIN WEB', b.social,
+    b.dist.toFixed(2), done[b.id] ? 'sí' : 'no'].map(q).join(';'));
+  const blob = new Blob(['\ufeff' + [head.map(q).join(';'), ...rows].join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `clientes-${norm($('sector').value)}-${norm($('city').value)}.csv`.replace(/\s+/g, '-');
+  a.click();
+};
+</script>
+</body>
+</html>
